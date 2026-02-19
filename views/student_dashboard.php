@@ -175,7 +175,7 @@ async function sendOTP() {
     const phone = document.getElementById('new_phone_val').value.trim();
 
     if (!/^[0-9]{10}$/.test(phone)) {
-        Swal.fire('Error', 'Sahi 10-digit number bhariye!', 'error');
+        Swal.fire('Error', 'Please enter a valid 10-digit phone number!', 'error');
         return;
     }
 

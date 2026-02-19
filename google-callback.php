@@ -4,11 +4,11 @@ require_once "config/Database.php";
 $conn = Database::connect();
 
 $client_id = '682449346419-aqreg5epb9pkqp07q7imc1fqf4cfr8ot.apps.googleusercontent.com';
-//$client_secret = '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'; 
-//$redirect_uri = 'http://localhost/students/google-callback.php'; 
+$client_secret = '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'; 
+$redirect_uri = 'http://localhost/students/google-callback.php'; 
 
-$client_id = "HIDDEN_FOR_SECURITY";
-$client_secret = "HIDDEN_FOR_SECURITY";
+//$client_id = "HIDDEN_FOR_SECURITY";
+//$client_secret = "HIDDEN_FOR_SECURITY";
 
 if (isset($_GET['code'])) {
     // 1. Google se Token lena
