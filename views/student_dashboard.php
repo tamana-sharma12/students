@@ -3,6 +3,7 @@ session_start();
 require_once "../config/Database.php";
 $conn = Database::connect();
 
+// Security: Check karein ki user login hai aur student hai
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'student') {
     header("Location: student_login.php");
     exit();
@@ -18,7 +19,6 @@ if (isset($_POST['update_profile'])) {
     $address = $_POST['address'];
     $gender  = $_POST['gender'];
 
-    // Phone ko yahan se hata diya hai kyunki wo OTP se update hoga
     $upd = $conn->prepare("UPDATE user SET name=:n, class=:c, address=:a, gender=:g WHERE id=:uid");
     $upd->execute([':n'=>$name, ':c'=>$class, ':a'=>$address, ':g'=>$gender, ':uid'=>$user_id]);
     $success_msg = "Profile Updated Successfully! ✅";
@@ -47,6 +47,7 @@ $editMode = isset($_GET['action']) && $_GET['action'] == 'edit';
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ScholarTrack | Student Profile</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -68,12 +69,14 @@ $editMode = isset($_GET['action']) && $_GET['action'] == 'edit';
         .info-box i { color: var(--primary); font-size: 1.2rem; width: 25px; }
         .info-box label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; }
         .info-box strong { display: block; color: #333; font-size: 15px; }
-        .btn { padding: 12px 25px; border-radius: 10px; border: none; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; transition: 0.3s; }
+        .btn { padding: 12px 25px; border-radius: 10px; border: none; cursor: pointer; font-weight: bold; text-decoration: none; display: inline-block; transition: 0.3s; text-align: center; }
         .btn-main { background: var(--primary); color: white; box-shadow: 0 5px 15px rgba(255,133,162,0.3); }
         input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-top: 5px; box-sizing: border-box;}
-        
-        /* New Style for Phone Update button */
         .phone-update-btn { background: #f0f0f0; border: 1px solid #ddd; padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; margin-top: 5px; color: var(--primary); font-weight: bold;}
+        
+        /* Modal Overlay */
+        #phoneModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:9999; }
+        .modal-body { background:white; padding:30px; border-radius:20px; width:350px; position:relative; box-shadow: 0 15px 50px rgba(0,0,0,0.2); }
     </style>
 </head>
 <body>
@@ -119,13 +122,11 @@ $editMode = isset($_GET['action']) && $_GET['action'] == 'edit';
             <form method="POST">
                 <div class="info-grid">
                     <div><label>Full Name</label><input type="text" name="name" value="<?= $student['name'] ?>"></div>
-                    
                     <div>
-                        <label>Phone Number (OTP Required to change)</label>
+                        <label>Phone Number (OTP Required)</label>
                         <input type="text" id="display_phone" value="<?= $student['phone'] ?>" readonly style="background: #f9f9f9; cursor: not-allowed;">
                         <button type="button" class="phone-update-btn" onclick="openPhoneModal()">Change Phone via OTP</button>
                     </div>
-
                     <div><label>Class</label><input type="text" name="class" value="<?= $student['class'] ?>"></div>
                     <div>
                         <label>Gender</label>
@@ -146,50 +147,85 @@ $editMode = isset($_GET['action']) && $_GET['action'] == 'edit';
     </div>
 </div>
 
+<div id="phoneModal">
+    <div class="modal-body">
+        <button onclick="closePhoneModal()" style="position:absolute;top:15px;right:15px;border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+        <div id="modal-content-area">
+            <h3>Update Phone</h3>
+            <p style="font-size:13px; color:#666; margin-bottom:15px;">Enter your new 10-digit number:</p>
+            <input type="text" id="new_phone_val" placeholder="9876543210" style="margin-bottom:15px;">
+            <button type="button" class="btn btn-main" style="width:100%;" onclick="sendOTP()">Send OTP</button>
+        </div>
+    </div>
+</div>
+
 <script>
-// Profile Update Logic (SweetAlert ke saath)
-const profileForm = document.querySelector('form[method="POST"]');
+// 1. OPEN MODAL
+function openPhoneModal() {
+    document.getElementById("phoneModal").style.display = "flex";
+}
 
-if(profileForm) {
-    profileForm.addEventListener('submit', async (e) => {
-        // Sirf tab AJAX chalayein jab hum Edit Mode mein hon aur Save button dabayein
-        if(e.submitter && e.submitter.name === 'update_profile') {
-            e.preventDefault();
-            
-            const formData = new FormData(profileForm);
-            
-            try {
-                // Aapki bani hui API file ko call karna
-                const response = await fetch('../api/update_profile_api.php', {
-                    method: 'POST',
-                    body: formData
-                });
+// 2. CLOSE MODAL
+function closePhoneModal() {
+    document.getElementById("phoneModal").style.display = "none";
+}
 
-                const result = await response.json();
+// 3. STEP 1: SEND OTP (WEBSERVICE)
+async function sendOTP() {
+    const phone = document.getElementById('new_phone_val').value.trim();
 
-                if (result.status === 'success') {
-                    Swal.fire({
-                        icon: 'success',
-                        title: 'Success!',
-                        text: result.message,
-                        confirmButtonColor: '#ff85a2'
-                    }).then(() => {
-                        window.location.href = 'student_dashboard.php'; // Data refresh ke liye
-                    });
-                } else {
-                    Swal.fire('Error', result.message, 'error');
-                }
-            } catch (error) {
-                console.error("Error:", error);
-                Swal.fire('Error', 'Server connection fail ho gaya!', 'error');
-            }
+    if (!/^[0-9]{10}$/.test(phone)) {
+        Swal.fire('Error', 'Sahi 10-digit number bhariye!', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('action', 'send_otp');
+    formData.append('phone', phone);
+
+    try {
+        const response = await fetch('../api/phone_handler.php', { method: 'POST', body: formData });
+        const res = await response.json();
+
+        if (res.status === "success") {
+            document.getElementById('modal-content-area').innerHTML = `
+                <h3>Verify OTP</h3>
+                <p style="font-size:13px;">OTP sent to: <b>${phone}</b></p>
+                <input type="text" id="otp_val" placeholder="Enter 6-Digit OTP" style="margin-bottom:15px;">
+                <button type="button" class="btn btn-main" style="width:100%;" onclick="verifyOTP()">Verify & Update</button>
+                <p style="font-size:11px; color:#ff85a2; margin-top:10px; background:#fff0f3; padding:5px; border-radius:5px; text-align:center;">Demo OTP: ${res.mock_otp}</p>
+            `;
+        } else {
+            Swal.fire('Error', res.message, 'error');
         }
-    });
+    } catch (e) {
+        Swal.fire('Error', 'API connect nahi ho payi!', 'error');
+    }
+}
+
+// 4. STEP 2: VERIFY OTP (WEBSERVICE)
+async function verifyOTP() {
+    const otp = document.getElementById('otp_val').value.trim();
+
+    const formData = new FormData();
+    formData.append('action', 'verify_otp');
+    formData.append('otp', otp);
+
+    try {
+        const response = await fetch('../api/phone_handler.php', { method: 'POST', body: formData });
+        const res = await response.json();
+
+        if (res.status === "success") {
+            Swal.fire({ icon: 'success', title: 'Done!', text: res.message, confirmButtonColor: '#ff85a2' })
+            .then(() => { location.href = 'student_dashboard.php'; });
+        } else {
+            Swal.fire('Error', res.message, 'error');
+        }
+    } catch (e) {
+        Swal.fire('Error', 'Verification fail ho gayi!', 'error');
+    }
 }
 </script>
 
 </body>
 </html>
-
-
-

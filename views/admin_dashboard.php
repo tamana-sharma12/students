@@ -14,53 +14,15 @@ if(!isset($_SESSION['role']) || $_SESSION['role'] != 'admin'){
 
 $db = $studentCtrl->db;
 
-// --- PAGINATION LOGIC ---
-$limit = 10; 
-$page = isset($_GET['page']) ? (int)$_GET['page'] : 1; 
-if($page < 1) $page = 1;
-$offset = ($page - 1) * $limit;
-
-$totalRecords = $db->query("SELECT COUNT(*) FROM student")->fetchColumn();
-$totalPages = ceil($totalRecords / $limit);
-
-// Fetch students
-$stmt = $db->prepare("
-    SELECT s.*, u.name, u.email 
-    FROM student s 
-    JOIN user u ON s.user_id = u.id 
-    ORDER BY s.id DESC 
-    LIMIT :limit OFFSET :offset
-");
-$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-$stmt->execute();
-$students = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Stats
-$totalStudents = $totalRecords;
+// Stats (Keeping these in PHP for quick load)
+$totalStudents = $db->query("SELECT COUNT(*) FROM student")->fetchColumn();
 $totalUsers = $db->query("SELECT COUNT(*) FROM user")->fetchColumn();
 $totalAdmins = $db->query("SELECT COUNT(*) FROM user WHERE role='admin'")->fetchColumn();
 
-// Add/Update/Delete Logic
-if($_POST){
-    if(isset($_POST['add_student'])){
-        $studentCtrl->add($_POST);
-        $_SESSION['success'] = "Student added successfully";
-        header("Location: admin_dashboard.php");
-        exit;
-    }
-    if(isset($_POST['update_student'])){
-        $db->prepare("UPDATE user SET name=?, email=? WHERE id=?")->execute([$_POST['name'], $_POST['email'], $_POST['user_id']]);
-        $db->prepare("UPDATE student SET class=?, phone=? WHERE id=?")->execute([$_POST['class'], $_POST['phone'], $_POST['id']]);
-        $_SESSION['success'] = "Student updated successfully";
-        header("Location: admin_dashboard.php");
-        exit;
-    }
-}
-
-if(isset($_GET['delete'])){
-    $studentCtrl->delete($_GET['delete']);
-    $_SESSION['success'] = "Student deleted successfully";
+// Add Logic
+if(isset($_POST['add_student'])){
+    $studentCtrl->add($_POST);
+    $_SESSION['success'] = "Student added successfully";
     header("Location: admin_dashboard.php");
     exit;
 }
@@ -73,6 +35,7 @@ if(isset($_GET['delete'])){
     <title>Admin Dashboard | SMS</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         body { background: #fff0f5; font-family: 'Poppins', sans-serif; }
         .dashboard { background: #fff; border-radius: 20px; padding: 30px; margin-top: 30px; box-shadow: 0 10px 30px rgba(255, 133, 162, 0.2); border: 1px solid #ffdae3; margin-bottom: 50px; }
@@ -113,10 +76,6 @@ if(isset($_GET['delete'])){
             <div id="suggestionBox" class="list-group position-absolute w-100 shadow d-none"></div>
         </div>
 
-        <?php if(isset($_SESSION['success'])): ?>
-            <div class="alert alert-success border-0"><?= $_SESSION['success']; unset($_SESSION['success']); ?></div>
-        <?php endif; ?>
-
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h5 style="color: #ff5e84;"><i class="fas fa-list"></i> Student Directory</h5>
             <button class="btn btn-success btn-sm px-4 py-2" onclick="toggleAddForm()">
@@ -141,93 +100,137 @@ if(isset($_GET['delete'])){
                     <tr><th>ID</th><th>Name</th><th>Email</th><th>Class</th><th>Phone</th><th>Action</th></tr>
                 </thead>
                 <tbody id="studentTableBody">
-                <?php foreach($students as $s): ?>
-                    <tr class="student-row">
-                        <form method="POST">
-                            <td><span class="badge rounded-pill bg-light text-dark">#<?= $s['id']; ?></span></td>
-                            <td><input name="name" value="<?= htmlspecialchars($s['name']); ?>" class="form-control form-control-sm border-0 bg-transparent student-name" disabled></td>
-                            <td><input name="email" value="<?= htmlspecialchars($s['email']); ?>" class="form-control form-control-sm border-0 bg-transparent" disabled></td>
-                            <td><input name="class" value="<?= htmlspecialchars($s['class']); ?>" class="form-control form-control-sm border-0 bg-transparent" disabled></td>
-                            <td><input name="phone" value="<?= htmlspecialchars($s['phone']); ?>" class="form-control form-control-sm border-0 bg-transparent" disabled></td>
-                            <td>
-                                <input type="hidden" name="id" value="<?= $s['id']; ?>">
-                                <input type="hidden" name="user_id" value="<?= $s['user_id']; ?>">
-                                <button type="button" class="btn btn-edit btn-sm" onclick="enableEdit(this)"><i class="fas fa-edit"></i></button>
-                                <button type="submit" name="update_student" class="btn btn-update btn-sm d-none"><i class="fas fa-check"></i></button>
-                                <a href="?delete=<?= $s['id']; ?>" class="btn btn-delete btn-sm" onclick="return confirm('Are you sure?')"><i class="fas fa-trash"></i></a>
-                            </td>
-                        </form>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
+                    </tbody>
             </table>
         </div>
     </div>
 </div>
 
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
-// --- Updated Search API Link ---
-document.getElementById('studentSearch').addEventListener('input', function() {
-    let query = this.value;
-    let suggestionBox = document.getElementById('suggestionBox');
+// Load data on page load
+document.addEventListener('DOMContentLoaded', loadStudents);
 
-    if (query.length > 0) {
-        // Correct path to your API file
-        fetch('../api/search_api.php?term=' + query)
-        .then(response => response.json())
-        .then(data => {
-            suggestionBox.innerHTML = "";
-            if (data.length > 0) {
-                suggestionBox.classList.remove('d-none');
-                data.forEach(item => {
-                    let a = document.createElement('a');
-                    a.href = "#";
-                    a.className = "list-group-item list-group-item-action border-0";
-                    a.innerHTML = `<strong>${item.name}</strong> <small class="text-muted ms-2">${item.email}</small>`;
-                    a.onclick = function(e) {
-                        e.preventDefault();
-                        document.getElementById('studentSearch').value = item.name;
-                        suggestionBox.classList.add('d-none');
-                        filterTable(item.name);
-                    };
-                    suggestionBox.appendChild(a);
-                });
-            } else {
-                suggestionBox.classList.add('d-none');
-            }
+// --- 0. FETCH STUDENTS (Webservice Consumption) ---
+function loadStudents() {
+    fetch('../api/get_students_api.php')
+    .then(res => res.json())
+    .then(data => {
+        let tbody = document.getElementById('studentTableBody');
+        tbody.innerHTML = ''; 
+        data.forEach(s => {
+            tbody.innerHTML += `
+                <tr class="student-row" id="row-${s.id}">
+                    <td><span class="badge rounded-pill bg-light text-dark">#${s.id}</span></td>
+                    <td><input id="name-${s.id}" value="${s.name}" class="form-control form-control-sm border-0 bg-transparent student-name" disabled></td>
+                    <td><input id="email-${s.id}" value="${s.email}" class="form-control form-control-sm border-0 bg-transparent" disabled></td>
+                    <td><input id="class-${s.id}" value="${s.class}" class="form-control form-control-sm border-0 bg-transparent" disabled></td>
+                    <td><input id="phone-${s.id}" value="${s.phone}" class="form-control form-control-sm border-0 bg-transparent" disabled></td>
+                    <td>
+                        <input type="hidden" id="user-${s.id}" value="${s.user_id}">
+                        <button type="button" class="btn btn-edit btn-sm edit-btn" onclick="enableEdit(${s.id}, this)"><i class="fas fa-edit"></i></button>
+                        <button type="button" class="btn btn-update btn-sm update-btn d-none" onclick="updateStudent(${s.id}, this)"><i class="fas fa-check"></i></button>
+                        <button type="button" class="btn btn-delete btn-sm" onclick="deleteStudent(${s.id})"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>`;
         });
-    } else {
-        suggestionBox.classList.add('d-none');
-        resetTable();
-    }
-});
+    })
+    .catch(err => console.error("Error loading students:", err));
+}
 
-function filterTable(name) {
-    let rows = document.querySelectorAll('.student-row');
-    rows.forEach(row => {
-        let studentName = row.querySelector('.student-name').value.toLowerCase();
-        row.style.display = studentName.includes(name.toLowerCase()) ? "" : "none";
+// --- 1. DELETE STUDENT (Webservice) ---
+function deleteStudent(id) {
+    Swal.fire({
+        title: 'Are you sure?',
+        text: "This student's record will be permanently deleted!",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ff85a2',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Yes, delete it!'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            fetch('../api/delete_student_api.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'id=' + id
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === 'success') {
+                    Swal.fire('Deleted!', 'Student removed successfully.', 'success');
+                    let row = document.getElementById('row-' + id);
+                    row.style.opacity = "0";
+                    setTimeout(() => row.remove(), 500);
+                } else {
+                    Swal.fire('Error!', data.message, 'error');
+                }
+            });
+        }
     });
 }
 
-function resetTable() {
-    document.querySelectorAll('.student-row').forEach(row => row.style.display = "");
+// --- 2. UPDATE STUDENT (Webservice) ---
+function updateStudent(id, btn) {
+    let formData = new FormData();
+    formData.append('id', id);
+    formData.append('user_id', document.getElementById('user-' + id).value);
+    formData.append('name', document.getElementById('name-' + id).value);
+    formData.append('email', document.getElementById('email-' + id).value);
+    formData.append('class', document.getElementById('class-' + id).value);
+    formData.append('phone', document.getElementById('phone-' + id).value);
+    formData.append('action', 'update_student');
+
+    fetch('../api/update_student_api.php', { method: 'POST', body: formData })
+    .then(res => res.json())
+    .then(data => {
+        if(data.status === 'success') {
+            Swal.fire('Success!', 'Updated successfully.', 'success');
+            disableEdit(id, btn);
+        } else {
+            Swal.fire('Error!', data.message, 'error');
+        }
+    });
 }
 
-function toggleAddForm(){ document.getElementById("addStudentForm").classList.toggle("d-none"); }
-
-function enableEdit(btn){
-    let row = btn.closest("tr");
+function enableEdit(id, btn){
+    let row = document.getElementById('row-' + id);
     row.querySelectorAll("input").forEach(i => {
         if(i.type !== "hidden") {
             i.disabled = false;
             i.classList.remove("border-0", "bg-transparent");
-            i.classList.add("border");
+            i.classList.add("border", "p-1");
+            i.style.background = "#fff";
         }
     });
     btn.classList.add("d-none");
-    row.querySelector("[name='update_student']").classList.remove("d-none");
+    row.querySelector(".update-btn").classList.remove("d-none");
 }
+
+function disableEdit(id, btn){
+    let row = document.getElementById('row-' + id);
+    row.querySelectorAll("input").forEach(i => {
+        if(i.type !== "hidden") {
+            i.disabled = true;
+            i.classList.add("border-0", "bg-transparent");
+            i.classList.remove("border", "p-1");
+            i.style.background = "transparent";
+        }
+    });
+    row.querySelector(".update-btn").classList.add("d-none");
+    row.querySelector(".edit-btn").classList.remove("d-none");
+}
+
+function toggleAddForm(){ document.getElementById("addStudentForm").classList.toggle("d-none"); }
+
+// Search Logic
+document.getElementById('studentSearch').addEventListener('input', function() {
+    let query = this.value.toLowerCase();
+    document.querySelectorAll('.student-row').forEach(row => {
+        let name = row.querySelector('.student-name').value.toLowerCase();
+        row.style.display = name.includes(query) ? "" : "none";
+    });
+});
 </script>
 </body>
 </html>

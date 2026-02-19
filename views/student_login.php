@@ -240,7 +240,7 @@ $google_url = "https://accounts.google.com/o/oauth2/v2/auth?" . http_build_query
 
         <button type="submit" class="login-btn">Login to Dashboard</button>
     </form>
-    </form>
+    
 
 <div style="text-align:right; margin-top:10px;">
     <a href="forgot_password.php" 
